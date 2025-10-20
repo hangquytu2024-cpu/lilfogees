@@ -45,19 +45,19 @@
         const ctx = canvas.getContext('2d');
 
         // --- TỰ ĐỘNG CO GIÃN CHO DI ĐỘNG ---
-        const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent);
-        const scaleFactor = isMobileDevice ? 0.7 : 1.0; // Giảm 30% kích thước và tốc độ trên di động
+        const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent); // Giữ lại để bật/tắt joystick
 
         // --- CÀI ĐẶT GAME ---
-        const PLAYER_SPEED = 2.0 * scaleFactor;
-        const PLAYER_SIZE = 100 * scaleFactor;
-        const SPAMMER_SIZE = 100 * scaleFactor;
-        const FARMER_SIZE = 100 * scaleFactor;
-        const FARMER_HITBOX_WIDTH = 40 * scaleFactor; // Hitbox thực tế của Farmer
-        const FARMER_HITBOX_HEIGHT = 100 * scaleFactor;
-        const BULLET_SPEED = 1.4 * scaleFactor;
+        // Các hằng số này sẽ được tính toán lại trong resizeCanvas
+        let PLAYER_SPEED;
+        let PLAYER_SIZE;
+        let SPAMMER_SIZE;
+        let FARMER_SIZE;
+        let FARMER_SPEED;
+        let FARMER_HITBOX_WIDTH;
+        let FARMER_HITBOX_HEIGHT;
+        let BULLET_SPEED;
         const BULLET_INTERVAL = 400; // frames (Increased, shoots slower)
-        const FARMER_SPEED = 2 * scaleFactor;
         const FARMER_ANIMATION_FRAMES = 1; // Sửa lại: Farmer là ảnh tĩnh
         const STONE_COUNT_TO_WIN = 5; // Số đá cần thu thập để thắng
         const INVINCIBILITY_DURATION = 120; // 2 giây ở 60 FPS
@@ -71,7 +71,7 @@
         const CREATOR_NAME = "QuyTu";
         const PLAYER_START_X = 50;
         let PLAYER_START_Y; // Sẽ được tính toán khi resize
-        const RETURN_BOX_SIZE = 100;
+        let RETURN_BOX_SIZE; // Sẽ được tính toán khi resize
         let RETURN_BOX_X; // Sẽ được tính toán khi resize
         let RETURN_BOX_Y; // Sẽ được tính toán khi resize
 
@@ -284,6 +284,7 @@
 
             // Cập nhật hướng nhìn của nhân vật
             if (dx > 0) player.facingRight = true;
+            if (dx > 0.1) player.facingRight = true;
             if (dx < 0) player.facingRight = false;
 
             player.x += dx * currentSpeed;
@@ -818,6 +819,25 @@
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
 
+            // --- TÍNH TOÁN LẠI KÍCH THƯỚC DỰA TRÊN CHIỀU CAO MÀN HÌNH ---
+            // Chọn một kích thước tham chiếu, ví dụ: người chơi cao 1/8 màn hình
+            const baseSize = canvas.height / 8; 
+
+            PLAYER_SIZE = baseSize;
+            SPAMMER_SIZE = baseSize;
+            FARMER_SIZE = baseSize;
+            RETURN_BOX_SIZE = baseSize;
+
+            // Tính toán các kích thước và tốc độ khác dựa trên baseSize
+            FARMER_HITBOX_WIDTH = FARMER_SIZE * 0.4; // 40% chiều rộng của Farmer
+            FARMER_HITBOX_HEIGHT = FARMER_SIZE;
+
+            // Tốc độ cũng nên được điều chỉnh để cảm giác chơi nhất quán
+            const baseSpeed = canvas.height / 400; // Tốc độ cơ bản
+            PLAYER_SPEED = baseSpeed * 1.2;
+            FARMER_SPEED = baseSpeed;
+            BULLET_SPEED = baseSpeed * 0.8;
+
             // Cập nhật lại các khu vực dựa trên chiều rộng màn hình
             START_AREA_END = canvas.width * 0.1; // 10% đầu là khu vực an toàn (Tỷ lệ 1:8:1)
             OBSTACLE_AREA_END = canvas.width * 0.9; // 10% + 80% = 90%
@@ -831,19 +851,8 @@
             }
             
             // Tái tạo vị trí của spammer để chúng luôn ở đúng góc
-            if (gameState === STATE_GAMEPLAY) {
-                spawnSpammers();
-            }
-        }
-        
-        function stopAllSounds(keepBackground = false) {
-            for (const key in sounds) {
-                if (keepBackground && key === 'background') {
-                    continue; // Bỏ qua nhạc nền nếu được yêu cầu
-                }
-                sounds[key].pause();
-                sounds[key].currentTime = 0;
-            }
+            // spawnSpammers() sẽ được gọi trong resetGame() khi bắt đầu màn chơi mới,
+            // không cần gọi lại ở đây để tránh spammer xuất hiện lại đột ngột khi xoay màn hình.
         }
         
         function tryPlayAllSounds() {
@@ -851,12 +860,12 @@
             // Hàm này cố gắng phát và dừng ngay lập tức để "mở khóa" âm thanh, chỉ chạy 1 lần.
             if (soundsUnlocked) return;
 
-            for (const key in sounds) {
-                sounds[key].play().catch(() => {});
-                sounds[key].pause();
-            }
-            soundsUnlocked = true;
-            console.log("Audio has been unlocked.");
+            // Chỉ cần phát một âm thanh (ví dụ: nhạc nền) để mở khóa.
+            // Trình duyệt sẽ nhớ quyền phát âm thanh cho các lần sau.
+            sounds.background.play().then(() => {
+                soundsUnlocked = true;
+                console.log("Audio has been unlocked.");
+            }).catch(e => console.log("User interaction is needed to unlock audio."));
         }
 
         function setupTouchControls() {
