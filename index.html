@@ -107,8 +107,7 @@
             currentY: 0,
             dx: 0, // Vector di chuyển x (-1 đến 1)
             dy: 0  // Vector di chuyển y (-1 đến 1)
-        };
-        let soundsUnlocked = false;
+        }; 
         let screenShake = {
             duration: 0,
             magnitude: 0,
@@ -817,7 +816,6 @@
         function handleKeyDown(e) {
             const key = e.key.toLowerCase();
             keys[key] = true;
-            tryPlayAllSounds();
             
             if (gameState === STATE_START) {
                 startGame();
@@ -858,19 +856,6 @@
             }
         }
         
-        function tryPlayAllSounds() {
-            // Trình duyệt yêu cầu tương tác người dùng trước khi phát âm thanh
-            // Hàm này cố gắng phát và dừng ngay lập tức để "mở khóa" âm thanh, chỉ chạy 1 lần.
-            if (soundsUnlocked) return;
-
-            for (const key in sounds) {
-                sounds[key].play().catch(() => {});
-                sounds[key].pause();
-            }
-            soundsUnlocked = true;
-            console.log("Audio has been unlocked.");
-        }
-
         function setupTouchControls() {
             const base = document.getElementById('joystick-base');
             const handle = document.getElementById('joystick-handle');
@@ -880,7 +865,6 @@
 
             canvas.addEventListener('touchstart', (e) => {
                 e.preventDefault();
-                tryPlayAllSounds();
 
                 if (gameState === STATE_START || gameState === STATE_WIN) {
                     startGame();
