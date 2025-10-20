@@ -64,8 +64,8 @@
         const PLAYER_HOLDING_STONE_SLOWDOWN = 0.8; // Giảm 20% tốc độ khi cầm đá
 
         // --- CÀI ĐẶT CO GIÃN CANVAS ---
-        let BASE_WIDTH = isMobileDevice ? 1440 : 1920; // Tỉ lệ 18:9 (1440x720) cho DT, 16:9 (1920x1080) cho PC
-        let BASE_HEIGHT = isMobileDevice ? 720 : 1080;
+        let BASE_WIDTH = isMobileDevice ? 1920 : 1920; // Tăng độ phân giải logic trên DT để "zoom out"
+        let BASE_HEIGHT = isMobileDevice ? 960 : 1080;  // Tỉ lệ 2:1 (18:9) cho DT, 16:9 cho PC
         let scaleInfo = { scale: 1, offsetX: 0, offsetY: 0 }; // Thông tin co giãn
 
         // Khu vực (sẽ được tính toán lại trong resizeCanvas)
@@ -306,16 +306,22 @@
             if (player.animation.state !== newState) {
                 player.animation.state = newState;
                 player.animation.frame = 0; // Reset frame khi đổi trạng thái để tránh nhấp nháy
+                
+                // Tối ưu hóa việc phát/dừng âm thanh chạy bộ để ổn định hơn trên di động
+                const isRunning = newState.includes('run');
+                const soundToPlay = player.holdingStone ? sounds.run_holding : sounds.run_normal;
+                const soundToStop = player.holdingStone ? sounds.run_normal : sounds.run_holding;
 
-                // Dừng tất cả âm thanh chạy
-                sounds.run_normal.pause(); 
-                sounds.run_holding.pause();
+                // Luôn dừng âm thanh không phù hợp
+                if (!soundToStop.paused) {
+                    soundToStop.pause();
+                }
 
-                // Bật âm thanh chạy phù hợp
-                if (newState === 'run') {
-                    sounds.run_normal.play();
-                } else if (newState === 'hold_run') {
-                    sounds.run_holding.play();
+                if (isRunning) {
+                    // Chỉ phát âm thanh cần thiết nếu nó đang không chạy
+                    if (soundToPlay.paused) {
+                        soundToPlay.play().catch(e => {});
+                    }
                 }
             }
         }
