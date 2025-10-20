@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Stone Collector</title> <!-- Title is already in English -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"> 
+    <title>QuyTu's Adventure</title> <!-- Đổi tên game của bạn ở đây -->
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+        /* --- CSS CHO JOYSTICK ẢO --- */
+        .joystick {
+            position: fixed;
+            display: none; /* Ẩn mặc định, chỉ hiện khi chạm */
+            opacity: 0.7;
+            z-index: 10;
+            user-select: none; /* Ngăn chọn văn bản */
+            pointer-events: none; /* Cho phép click xuyên qua */
+        }
+        #joystick-base {
+            width: 120px;
+            height: 120px;
+            background: #888;
+            border: 2px solid #fff;
+            border-radius: 50%;
+        }
+        #joystick-handle {
+            width: 60px;
+            height: 60px;
+            background: #ccc;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <!-- Joystick ảo sẽ được tạo và điều khiển bằng JavaScript -->
+    <div id="joystick-base" class="joystick">
+        <div id="joystick-handle" class="joystick"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- TỰ ĐỘNG CO GIÃN CHO DI ĐỘNG ---
+        const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent);
+        const scaleFactor = isMobileDevice ? 0.7 : 1.0; // Giảm 30% kích thước và tốc độ trên di động
+
+        // --- CÀI ĐẶT GAME ---
+        const PLAYER_SPEED = 2.0 * scaleFactor;
+        const PLAYER_SIZE = 100 * scaleFactor;
+        const SPAMMER_SIZE = 100 * scaleFactor;
+        const FARMER_SIZE = 100 * scaleFactor;
+        const FARMER_HITBOX_WIDTH = 40 * scaleFactor; // Hitbox thực tế của Farmer
+        const FARMER_HITBOX_HEIGHT = 100 * scaleFactor;
+        const BULLET_SPEED = 1.4 * scaleFactor;
+        const BULLET_INTERVAL = 400; // frames (Increased, shoots slower)
+        const FARMER_SPEED = 2 * scaleFactor;
+        const FARMER_ANIMATION_FRAMES = 1; // Sửa lại: Farmer là ảnh tĩnh
+        const STONE_COUNT_TO_WIN = 5; // Số đá cần thu thập để thắng
+        const INVINCIBILITY_DURATION = 120; // 2 giây ở 60 FPS
+        const PLAYER_HOLDING_STONE_SLOWDOWN = 0.8; // Giảm 20% tốc độ khi cầm đá
+
+        // Khu vực (sẽ được tính toán lại trong resizeCanvas)
+        let START_AREA_END;
+        let OBSTACLE_AREA_END;
+
+        // Vị trí cố định
+        const CREATOR_NAME = "QuyTu";
+        const PLAYER_START_X = 50;
+        let PLAYER_START_Y; // Sẽ được tính toán khi resize
+        const RETURN_BOX_SIZE = 100;
+        let RETURN_BOX_X; // Sẽ được tính toán khi resize
+        let RETURN_BOX_Y; // Sẽ được tính toán khi resize
+
+        // Cài đặt đá (sử dụng hình ảnh)
+        const STONE_SIZE = 60; // Giữ kích thước đá không đổi
+        const STONE_TYPES = [
+            { assetKey: 'stone1', size: STONE_SIZE },
+            { assetKey: 'stone2', size: STONE_SIZE },
+            { assetKey: 'stone3', size: STONE_SIZE },
+            { assetKey: 'stone4', size: STONE_SIZE },
+            { assetKey: 'stone5', size: STONE_SIZE },
+        ];
+
+        // Trạng thái game
+        const STATE_LOADING = 0;    // Đang tải
+        const STATE_START = 1;      // Màn hình chờ
+        const STATE_GAMEPLAY = 2;   // Đang chơi
+        const STATE_WIN = 3;        // Thắng
+        let gameState = STATE_LOADING;
+
+        // Biến trạng thái
+        let score = 0;
+        let frameCount = 0;
+        let keys = {};
+        let gameStartTime = 0; // Để theo dõi thời gian chơi
+        let finalTime = null; // Để lưu thời gian hoàn thành
+        // Trạng thái joystick ảo
+        let joystick = {
+            active: false,
+            startX: 0,
+            startY: 0,
+            currentX: 0,
+            currentY: 0,
+            dx: 0, // Vector di chuyển x (-1 đến 1)
+            dy: 0  // Vector di chuyển y (-1 đến 1)
+        };
+        let soundsUnlocked = false;
+        let screenShake = {
+            duration: 0,
+            magnitude: 0,
+            active: false
+        };
+
+        // Đối tượng game
+        let player = {
+            x: PLAYER_START_X,
+            y: 0, // Sẽ được khởi tạo
+            holdingStone: false,
+            facingRight: true, // Hướng nhìn của nhân vật
+            // Dành cho animation
+            animation: {
+                state: 'idle', // 'idle', 'run', 'hold_idle', 'hold_run'
+                frame: 0,
+                frameDuration: 8, // số frame game cho mỗi frame animation
+                lastFrameUpdate: 0,
+                invincible: false,
+                invincibilityTimer: 0,
+                isStunned: false, // Trạng thái bị choáng
+                stunTimer: 0      // Bộ đếm thời gian choáng
+            },
+        };
+        let stone = null; // {x, y, onMap: true/false, assetKey, size}
+        let spammers = []; // {x, y, nextShotFrame}
+        let farmers = []; // {x, y, direction, speed, animation: {frame, ...}}
+        let bullets = []; // {x, y, dx, dy, symbol}
+
+        // Biến toàn cục cho Spammer
+        let nextGlobalShotFrame = 0;
+
+        // --- QUẢN LÝ ÂM THANH ---
+        const sounds = {
+            background: new Audio('music_background.mp3'), // Nhạc nền chung
+            farmer_move: new Audio('farmer_move.mp3'),
+            spammer_attack: new Audio('spammer_attack.mp3'),
+            run_normal: new Audio('run_normal.mp3'), // Âm thanh gốc
+            run_holding: new Audio('run_holding.mp3'), // Âm thanh gốc
+            player_hit: new Audio('player_hit.mp3') // Âm thanh khi bị va chạm
+        };
+        // Điều chỉnh âm lượng
+        sounds.background.volume = 0.2; // Giảm xuống còn 0.1
+        sounds.farmer_move.volume = 0.05; // Giảm 50% từ 0.1
+        sounds.spammer_attack.volume = 0.1; // Giảm xuống còn 0.1
+        sounds.run_normal.volume = 1.0; // Giữ nguyên
+        sounds.run_holding.volume = 1.0; // Giữ nguyên
+
+        // --- QUẢN LÝ TÀI NGUYÊN (ASSETS) ---
+        const assets = {
+            background: { src: 'background.png', img: null, frames: 1 },
+            idle: { src: 'idle.png', img: null, frames: 1 },
+            run: { src: 'run.png', img: null, frames: 7 },
+            spammer: { src: 'spammer.png', img: null, frames: 1 },
+            farmer_down: { src: 'farmer_down.png', img: null, frames: FARMER_ANIMATION_FRAMES },
+            farmer_up: { src: 'farmer_up.png', img: null, frames: FARMER_ANIMATION_FRAMES },
+            return_box: { src: 'return_box.png', img: null, frames: 1 },
+            stone1: { src: 'stone1.png', img: null, frames: 1 },
+            stone2: { src: 'stone2.png', img: null, frames: 1 },
+            stone3: { src: 'stone3.png', img: null, frames: 1 },
+            stone4: { src: 'stone4.png', img: null, frames: 1 },
+            stone5: { src: 'stone5.png', img: null, frames: 1 },
+        };
+        let assetsLoaded = 0;
+        const totalAssets = Object.keys(assets).length;
+
+        // --- KHỞI TẠO VÀ VÒNG LẶP GAME ---
+
+        function init() {
+            resizeCanvas();
+            setupEventListeners();
+            setupSoundLooping();
+            loadAssets();
+        }
+
+        function loadAssets() {
+            // Nếu không có tài nguyên nào để tải, bắt đầu game ngay
+            if (totalAssets === 0) {
+                resetGame();
+                gameLoop();
+                return;
+            }
+
+            const onAssetLoad = () => {
+                assetsLoaded++;
+                if (assetsLoaded === totalAssets) {
+                    // Tất cả tài nguyên đã được tải, bắt đầu game
+                    gameState = STATE_START; // Chuyển sang màn hình chờ
+                    gameLoop(); // Bắt đầu vòng lặp game để vẽ màn hình chờ
+                }
+            };
+
+            for (const key in assets) {
+                assets[key].img = new Image();
+                assets[key].img.src = assets[key].src;
+                assets[key].img.onload = onAssetLoad;
+                assets[key].img.onerror = () => {
+                    console.error(`Lỗi: Không thể tải tệp '${assets[key].src}'. Sẽ sử dụng hình khối thay thế.`);
+                    onAssetLoad(); // Vẫn tính là đã "xử lý" xong tài nguyên này
+                };
+            }
+        }
+
+        function resetGame() {
+            stopAllSounds(true); // Dừng tất cả âm thanh trừ nhạc nền
+            sounds.farmer_move.play().catch(e => console.log("Interaction needed to play audio"));
+            // Nhạc nền sẽ tiếp tục chơi nếu đã được bắt đầu
+            if (sounds.background.paused) sounds.background.play().catch(e => console.log("Interaction needed to play audio"));
+            score = 0;
+            gameStartTime = performance.now(); // Bắt đầu đếm giờ
+            spammers = [];
+            finalTime = null; // Reset thời gian hoàn thành
+            farmers = [];
+            bullets = [];
+            
+            // Sinh ra 4 farmer cách đều nhau
+            const farmerCount = 4;
+            const obstacleAreaWidth = OBSTACLE_AREA_END - START_AREA_END;
+            const segmentWidth = obstacleAreaWidth / farmerCount;
+            for (let i = 0; i < farmerCount; i++) {
+                const x = START_AREA_END + (i * segmentWidth) + (segmentWidth - FARMER_SIZE) / 2;
+                spawnFarmer(x);
+            }
+            spawnSpammers(); // Sinh ra các spammer ở vị trí cố định
+            spawnStone(); 
+            resetPlayerPosition();
+            // gameState đã được đặt trước khi gọi hàm này
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            frameCount++;
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- CẬP NHẬT TRẠNG THÁI GAME ---
+
+        function update() {
+            if (gameState !== STATE_GAMEPLAY) return; // Chỉ cập nhật khi đang chơi
+
+            updatePlayer();
+            updateFarmers();
+            updateSpammersAndBullets();
+            updateTimers();
+            
+            checkCollisions();
+            checkPickupStone();
+            checkReturnStone();
+        }
+
+        function updatePlayer() {
+            // Nếu người chơi bị choáng, không cho phép di chuyển
+            if (player.animation.isStunned) return;
+
+            let dx = 0;
+            let dy = 0;
+
+            if (isMobileDevice && joystick.active) {
+                // Trên di động, sử dụng vector từ joystick
+                dx = joystick.dx;
+                dy = joystick.dy;
+            } else {
+                // Trên PC, sử dụng bàn phím
+                if (keys['w'] || keys['arrowup']) dy = -1;
+                if (keys['s'] || keys['arrowdown']) dy = 1;
+                if (keys['a'] || keys['arrowleft']) dx = -1;
+                if (keys['d'] || keys['arrowright']) dx = 1;
+            }
+
+            // Giảm tốc độ nếu đang cầm đá
+            const currentSpeed = player.holdingStone ? PLAYER_SPEED * PLAYER_HOLDING_STONE_SLOWDOWN : PLAYER_SPEED;
+
+            // Cập nhật hướng nhìn của nhân vật
+            if (dx > 0) player.facingRight = true;
+            if (dx < 0) player.facingRight = false;
+
+            player.x += dx * currentSpeed;
+            player.y += dy * currentSpeed;
+
+            // Giới hạn di chuyển trong màn hình
+            player.x = Math.max(0, Math.min(canvas.width - PLAYER_SIZE, player.x));
+            player.y = Math.max(0, Math.min(canvas.height - PLAYER_SIZE, player.y));
+            
+            // Cập nhật trạng thái animation
+            const isMoving = dx !== 0 || dy !== 0;
+            const baseState = isMoving ? 'run' : 'idle';
+            const newState = player.holdingStone ? `hold_${baseState}` : baseState;
+
+            if (player.animation.state !== newState) {
+                player.animation.state = newState;
+                player.animation.frame = 0; // Reset frame khi đổi trạng thái để tránh nhấp nháy
+
+                // Dừng tất cả âm thanh chạy
+                sounds.run_normal.pause(); 
+                sounds.run_holding.pause();
+
+                // Bật âm thanh chạy phù hợp
+                if (newState === 'run') {
+                    sounds.run_normal.play();
+                } else if (newState === 'hold_run') {
+                    sounds.run_holding.play();
+                }
+            }
+        }
+
+        function updateFarmers() {
+            farmers.forEach(farmer => {
+                farmer.y += farmer.direction * farmer.speed;
+                if (farmer.y <= 0 || farmer.y + FARMER_SIZE >= canvas.height) {
+                    farmer.direction *= -1;
+                }
+
+                // Cập nhật animation frame cho farmer
+                if (frameCount - farmer.animation.lastFrameUpdate > farmer.animation.frameDuration) {
+                    farmer.animation.frame = (farmer.animation.frame + 1) % FARMER_ANIMATION_FRAMES;
+                    farmer.animation.lastFrameUpdate = frameCount;
+                }
+            });
+        }
+
+        function updateSpammersAndBullets() {
+            // Spammer bắn đạn
+            if (frameCount >= nextGlobalShotFrame) {
+                if (spammers.length > 0) sounds.spammer_attack.play(); // Chỉ phát 1 lần cho tất cả
+                spammers.forEach(spammer => {
+                    spawnBullet(spammer);
+                });
+                nextGlobalShotFrame = frameCount + BULLET_INTERVAL; // Đặt thời gian cho lần bắn đồng bộ tiếp theo
+            }
+
+            // Cập nhật vị trí và lọc đạn
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                bullet.x += bullet.dx * BULLET_SPEED;
+                bullet.y += bullet.dy * BULLET_SPEED;
+
+                // Nếu đạn ra khỏi màn hình, xóa nó khỏi mảng
+                if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+
+        function updateTimers() {
+            // Cập nhật bộ đếm bất tử
+            if (player.animation.invincible) {
+                player.animation.invincibilityTimer--;
+                if (player.animation.invincibilityTimer <= 0) player.animation.invincible = false;
+            }
+
+            // Cập nhật bộ đếm choáng
+            if (player.animation.isStunned) {
+                player.animation.stunTimer--;
+                if (player.animation.stunTimer <= 0) player.animation.isStunned = false;
+            }
+        }
+
+        // --- LOGIC SINH ĐỐI TƯỢNG (SPAWN) ---
+
+        function spawnStone() {
+            const type = STONE_TYPES[Math.floor(Math.random() * STONE_TYPES.length)];
+            stone = {
+                x: OBSTACLE_AREA_END + Math.random() * (canvas.width - OBSTACLE_AREA_END - type.size),
+                y: Math.random() * (canvas.height - type.size),
+                onMap: true,
+                ...type // Sao chép thuộc tính assetKey và size
+            };
+        }
+
+        function spawnSpammers() {
+            spammers = []; // Xóa các spammer cũ
+            const maxSpammers = 6;
+            const positions = [
+                { x: START_AREA_END, y: 0 },
+                { x: OBSTACLE_AREA_END - SPAMMER_SIZE, y: 0 },
+                { x: START_AREA_END + (OBSTACLE_AREA_END - START_AREA_END - SPAMMER_SIZE) / 2, y: 0 }, // Giữa trên
+                { x: START_AREA_END + (OBSTACLE_AREA_END - START_AREA_END - SPAMMER_SIZE) / 2, y: canvas.height - SPAMMER_SIZE }, // Giữa dưới
+                { x: START_AREA_END, y: canvas.height - SPAMMER_SIZE },
+                { x: OBSTACLE_AREA_END - SPAMMER_SIZE, y: canvas.height - SPAMMER_SIZE },
+            ];
+            positions.slice(0, maxSpammers).forEach(pos => {
+                spammers.push({
+                    ...pos,
+                });
+            });
+        }
+
+        function spawnFarmer(x) {
+            farmers.push({ 
+                x, 
+                y: Math.random() * (canvas.height - FARMER_SIZE), // Vị trí Y ngẫu nhiên
+                direction: Math.random() < 0.5 ? 1 : -1, // Hướng đi ngẫu nhiên
+                speed: FARMER_SPEED * (0.75 + Math.random() * 0.5), // Tốc độ ngẫu nhiên
+                animation: {
+                    frame: 0,
+                    frameDuration: 15, // Có thể ngẫu nhiên hóa nếu muốn
+                    lastFrameUpdate: 0
+                }
+            });
+        }
+
+        function spawnBullet(spammer) {
+            const angle = Math.atan2(player.y - spammer.y, player.x - spammer.x);
+            const symbols = ['@', '#', '$', '%', '&'];
+            bullets.push({
+                x: spammer.x + SPAMMER_SIZE / 2,
+                y: spammer.y + SPAMMER_SIZE / 2,
+                dx: Math.cos(angle),
+                dy: Math.sin(angle),
+                symbol: symbols[Math.floor(Math.random() * symbols.length)]
+            });
+        }
+
+        // --- KIỂM TRA VA CHẠM VÀ TƯƠNG TÁC ---
+
+        function checkCollisions() {
+            let collision = false;
+            // Bỏ qua va chạm nếu người chơi đang bất tử hoặc ở khu vực an toàn
+            if (player.animation.invincible || player.x + PLAYER_SIZE < START_AREA_END) {
+                return;
+            }
+            // Va chạm với farmer
+            for (const farmer of farmers) {
+                // Dịch chuyển hitbox của farmer vào giữa hình ảnh
+                const farmerHitbox = {
+                    x: farmer.x + (FARMER_SIZE - FARMER_HITBOX_WIDTH) / 2,
+                    y: farmer.y
+                };
+                if (checkRectCollision(player, farmerHitbox, {w: PLAYER_SIZE, h: PLAYER_SIZE}, {w: FARMER_HITBOX_WIDTH, h: FARMER_HITBOX_HEIGHT})) {
+                    collision = true;
+                    break;
+                }
+            }
+            // Va chạm với đạn
+            if (!collision) {
+                for (let i = bullets.length - 1; i >= 0; i--) {
+                    const bullet = bullets[i];
+                    const bulletHitbox = { x: bullet.x - 10, y: bullet.y - 10 }; // Căn giữa hitbox 20x20
+
+                    if (checkRectCollision(player, bulletHitbox, {w: PLAYER_SIZE, h: PLAYER_SIZE}, {w: 20, h: 20})) {
+                        collision = true;
+                        bullets.splice(i, 1); // Xóa viên đạn khi va chạm
+                        break; // Chỉ xử lý 1 va chạm mỗi frame
+                    }
+                }
+            }
+            if (collision) {
+                handlePlayerHit();
+            }
+        }
+
+        function checkPickupStone() {
+            if (!player.holdingStone && stone && stone.onMap) {
+                if (checkRectCollision(player, stone, {w: PLAYER_SIZE, h: PLAYER_SIZE}, {w: stone.size, h: stone.size})) {
+                    player.holdingStone = true;
+                    sounds.run_normal.pause();
+                    if (player.animation.state === 'run') sounds.run_holding.play();
+                    stone.onMap = false;
+                }
+            }
+        }
+
+        function checkReturnStone() {
+            if (player.holdingStone && player.x < START_AREA_END) {
+                const returnBox = { x: RETURN_BOX_X, y: RETURN_BOX_Y, width: RETURN_BOX_SIZE, height: RETURN_BOX_SIZE };
+                const playerBox = { x: player.x, y: player.y, width: PLAYER_SIZE, height: PLAYER_SIZE };
+                if (checkRectCollision(playerBox, returnBox)) {
+                    score++;
+                    sounds.run_holding.pause();
+                    if (player.animation.state === 'run') sounds.run_normal.play();
+                    player.holdingStone = false;
+                    if (score >= STONE_COUNT_TO_WIN) {
+                        gameState = STATE_WIN;
+                        finalTime = performance.now() - gameStartTime; // Lưu thời gian hoàn thành
+                    } else {
+                        spawnStone();
+                    }
+                }
+            }
+        }
+
+        function handlePlayerHit() {
+            // Không còn mạng, chỉ reset vị trí và bật bất tử
+            sounds.player_hit.currentTime = 0; // Đảm bảo âm thanh phát lại từ đầu
+            sounds.player_hit.play(); // Phát âm thanh va chạm
+            player.animation.invincible = true;
+            player.animation.invincibilityTimer = INVINCIBILITY_DURATION;
+            player.animation.isStunned = true;
+            player.animation.stunTimer = 60; // 1 giây ở 60 FPS
+            // Kích hoạt hiệu ứng rung màn hình
+            startScreenShake(15, 5); // Rung trong 15 frames với cường độ 5px
+            resetPlayerPosition();
+        }
+
+        function resetPlayerPosition() {
+            // Nếu đang cầm đá, thả nó ra tại vị trí hiện tại TRƯỚC KHI reset vị trí người chơi
+            if (player.holdingStone) {
+                stone.x = player.x; // Vị trí hiện tại của người chơi
+                stone.y = player.y; // Vị trí hiện tại của người chơi
+                stone.onMap = true;
+                player.holdingStone = false;
+                sounds.run_holding.pause();
+                sounds.run_normal.pause();
+            }
+            // Sau đó mới reset vị trí người chơi về điểm xuất phát
+            player.x = PLAYER_START_X;
+            player.y = PLAYER_START_Y;
+        }
+
+        // --- VẼ LÊN CANVAS ---
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Lưu trạng thái canvas trước khi áp dụng hiệu ứng rung
+            ctx.save();
+
+            // Áp dụng hiệu ứng rung nếu đang hoạt động
+            if (screenShake.duration > 0) {
+                screenShake.duration--;
+                const dx = (Math.random() - 0.5) * 2 * screenShake.magnitude;
+                const dy = (Math.random() - 0.5) * 2 * screenShake.magnitude;
+                ctx.translate(dx, dy);
+            }
+
+            if (gameState === STATE_LOADING) {
+                drawLoadingScreen();
+            } else if (gameState === STATE_START) {
+                drawStartScreen();
+            } else if (gameState === STATE_GAMEPLAY) { 
+                drawBackground();
+                drawReturnBox();
+                if (stone && stone.onMap) drawStone();
+                drawSpammers();
+                drawFarmers();
+                drawBullets();
+                drawPlayer();
+            } else if (gameState === STATE_WIN) {
+                drawWinScreen();
+            }
+
+            // Khôi phục trạng thái canvas, loại bỏ hiệu ứng rung
+            ctx.restore();
+
+            // Vẽ UI sau khi khôi phục để nó không bị rung
+            if (gameState === STATE_GAMEPLAY) {
+                drawUI();
+            }
+        }
+
+        function drawLoadingScreen() {
+            ctx.fillStyle = 'white';
+            ctx.font = '30px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(`Loading... (${assetsLoaded}/${totalAssets})`, canvas.width / 2, canvas.height / 2);
+        }
+
+        function drawStartScreen() {
+            drawBackground(); // Vẽ nền trước
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white'; 
+            ctx.font = 'bold 40px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Press any key or tap to start', canvas.width / 2, canvas.height / 2);
+        }
+
+        function drawBackground() {
+            const asset = assets.background;
+            if (asset && asset.img && asset.img.complete) {
+                const img = asset.img;
+                const canvasAspect = canvas.width / canvas.height;
+                const imgAspect = img.width / img.height;
+
+                let sx, sy, sWidth, sHeight;
+
+                if (imgAspect > canvasAspect) {
+                    // Ảnh rộng hơn canvas -> Cắt hai bên của ảnh
+                    sHeight = img.height;
+                    sWidth = sHeight * canvasAspect;
+                    sx = (img.width - sWidth) / 2;
+                    sy = 0;
+                } else {
+                    // Ảnh cao hơn canvas -> Cắt trên dưới của ảnh
+                    sWidth = img.width;
+                    sHeight = sWidth / canvasAspect;
+                    sx = 0;
+                    sy = (img.height - sHeight) / 2;
+                }
+                ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function drawReturnBox() {
+            const asset = assets.return_box;
+            if (asset && asset.img && asset.img.complete) {
+                ctx.drawImage(asset.img, RETURN_BOX_X, RETURN_BOX_Y, RETURN_BOX_SIZE, RETURN_BOX_SIZE);
+            } else {
+                ctx.fillStyle = 'cyan';
+                ctx.fillRect(RETURN_BOX_X, RETURN_BOX_Y, RETURN_BOX_SIZE, RETURN_BOX_SIZE);
+            }
+        }
+
+        function drawPlayer() {
+            // Chọn sprite sheet dựa trên trạng thái của người chơi
+            // Luôn sử dụng 'idle' hoặc 'run' làm key để lấy ảnh
+            const currentAnimationKey = player.animation.state.includes('run') ? 'run' : 'idle';
+            
+            const currentAsset = assets[currentAnimationKey];
+
+            // Xử lý hiệu ứng nhấp nháy khi bất tử
+            if (player.animation.invincible) {
+                if (Math.floor(player.animation.invincibilityTimer / 5) % 2 !== 0) return; // Bỏ qua vẽ để tạo hiệu ứng
+            }
+            // Nếu asset chưa được tải hoặc không tồn tại, vẽ hình chữ nhật màu đỏ để báo lỗi
+            if (!currentAsset || !currentAsset.img || !currentAsset.img.complete) {
+                ctx.fillStyle = 'red';
+                ctx.fillRect(player.x, player.y, PLAYER_SIZE, PLAYER_SIZE);
+                // Vẽ viên đá trên đầu nếu đang cầm (dự phòng)
+                if (player.holdingStone && stone && stone.assetKey) {
+                    const stoneAsset = assets[stone.assetKey];
+                    if (stoneAsset && stoneAsset.img && stoneAsset.img.complete) {
+                        const stoneSize = stone.size * 1.5; // Làm cho đá trên đầu to hơn một chút
+                        ctx.drawImage(stoneAsset.img, player.x + PLAYER_SIZE / 2 - stoneSize / 2, player.y - stoneSize, stoneSize, stoneSize);
+                    }
+                }
+                return; // Dừng hàm nếu asset chưa sẵn sàng
+            } else {
+                // Cập nhật frame của animation
+                if (frameCount - player.animation.lastFrameUpdate > player.animation.frameDuration) {
+                    player.animation.frame = (player.animation.frame + 1) % currentAsset.frames;
+                    player.animation.lastFrameUpdate = frameCount;
+                }
+
+                const frameWidth = currentAsset.img.width / currentAsset.frames;
+                const frameHeight = currentAsset.img.height;
+                const sourceX = player.animation.frame * frameWidth;
+
+                ctx.save();
+                // Lật ảnh nếu nhân vật không quay mặt sang phải
+                if (!player.facingRight) {
+                    ctx.scale(-1, 1);
+                    ctx.translate(-player.x * 2 - PLAYER_SIZE, 0);
+                }
+                
+                // Tính toán tỷ lệ co dãn để không làm méo ảnh
+                const aspectRatio = frameWidth / frameHeight;
+                const drawHeight = PLAYER_SIZE;
+                const drawWidth = drawHeight * aspectRatio;
+
+                ctx.drawImage(
+                    currentAsset.img,        // Ảnh nguồn (sprite sheet)
+                    sourceX, 0,              // Tọa độ (x, y) để bắt đầu cắt trong ảnh nguồn
+                    frameWidth, frameHeight, // Kích thước (w, h) của phần cần cắt
+                    player.x + (PLAYER_SIZE - drawWidth) / 2, player.y, // Căn giữa nhân vật theo chiều ngang
+                    drawWidth, drawHeight    // Kích thước vẽ lên canvas, giữ đúng tỷ lệ
+                );
+
+                ctx.restore();
+            }
+            
+            // Vẽ viên đá trên đầu nếu đang cầm
+            if (player.holdingStone && stone) {
+                const stoneAsset = assets[stone.assetKey];
+                if (stoneAsset && stoneAsset.img && stoneAsset.img.complete) {
+                    const stoneSize = stone.size * 1.5; // Làm cho đá trên đầu to hơn một chút
+                    ctx.drawImage(stoneAsset.img, player.x + PLAYER_SIZE / 2 - stoneSize / 2, player.y - stoneSize, stoneSize, stoneSize);
+                }
+            }
+        }
+
+        function drawStone() {
+            const asset = assets[stone.assetKey];
+            if (asset && asset.img && asset.img.complete) {
+                ctx.drawImage(asset.img, stone.x, stone.y, stone.size, stone.size);
+            } else {
+                // Vẽ hình vuông dự phòng nếu ảnh chưa tải xong
+                ctx.fillStyle = 'grey';
+                ctx.fillRect(stone.x, stone.y, stone.size, stone.size);
+            }
+        }
+
+        function drawSpammers() {
+            const asset = assets.spammer;
+            spammers.forEach(s => {
+                if (asset && asset.img && asset.img.complete) {
+                    ctx.drawImage(asset.img, s.x, s.y, SPAMMER_SIZE, SPAMMER_SIZE);
+                } else {
+                    ctx.fillStyle = 'purple'; // Màu dự phòng
+                    ctx.fillRect(s.x, s.y, SPAMMER_SIZE, SPAMMER_SIZE);
+                }
+            });
+        }
+
+        function drawFarmers() {
+            farmers.forEach(f => {
+                const assetKey = f.direction === 1 ? 'farmer_down' : 'farmer_up';
+                const asset = assets[assetKey];
+                if (asset && asset.img && asset.img.complete) {
+                    const frameWidth = asset.img.width / asset.frames;
+                    const sourceX = f.animation.frame * frameWidth;
+                    ctx.drawImage(
+                        asset.img,
+                        sourceX, 0, frameWidth, asset.img.height,
+                        f.x, f.y, FARMER_SIZE, FARMER_SIZE
+                    );
+                } else {
+                    ctx.fillStyle = 'yellow'; // Màu dự phòng
+                    ctx.fillRect(f.x, f.y, FARMER_SIZE, FARMER_SIZE);
+                }
+            });
+        }
+
+        function drawBullets() {
+            ctx.fillStyle = 'white';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'center';
+            bullets.forEach(b => ctx.fillText(b.symbol, b.x, b.y));
+        }
+
+        function drawUI() {
+            ctx.fillStyle = 'white';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText(`Stones: ${score} / ${STONE_COUNT_TO_WIN}`, 10, 30);
+
+            // Vẽ bộ đếm thời gian
+            const elapsedTime = performance.now() - gameStartTime;
+            const minutes = Math.floor(elapsedTime / 60000);
+            const seconds = Math.floor((elapsedTime % 60000) / 1000);
+            const milliseconds = Math.floor((elapsedTime % 1000) / 10); // Lấy 2 chữ số
+            const timeString = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(milliseconds).padStart(2, '0')}`;
+            ctx.textAlign = 'right';
+            ctx.fillText(timeString, canvas.width - 10, 30);
+
+        }
+
+        function drawWinScreen() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'gold';
+            ctx.font = '60px Arial';
+            ctx.textAlign = 'center'; 
+            ctx.fillText('YOU WIN!', canvas.width / 2, canvas.height / 2);
+
+            // Hiển thị thời gian hoàn thành
+            if (finalTime !== null) {
+                const minutes = Math.floor(finalTime / 60000);
+                const seconds = Math.floor((finalTime % 60000) / 1000);
+                const milliseconds = Math.floor((finalTime % 1000) / 10);
+                const timeString = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(milliseconds).padStart(2, '0')}`;
+                ctx.font = '30px Arial';
+                ctx.fillStyle = 'white';
+                ctx.fillText(`Completion Time: ${timeString}`, canvas.width / 2, canvas.height / 2 + 60);
+            }
+            ctx.font = '24px Arial';
+            ctx.fillText('Press any key or tap to play again', canvas.width / 2, canvas.height / 2 + 100);
+        }
+
+        function startScreenShake(duration, magnitude) {
+            screenShake.duration = duration;
+            screenShake.magnitude = magnitude;
+        }
+
+        // --- TIỆN ÍCH VÀ SỰ KIỆN ---
+
+        function setupEventListeners() {
+            window.addEventListener('resize', resizeCanvas);
+            window.addEventListener('keydown', handleKeyDown);
+            window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+            // Hợp nhất xử lý chạm và click vào một chỗ để tránh xung đột trên di động
+            setupTouchControls();
+        }
+
+        function startGame() {
+            gameState = STATE_GAMEPLAY;
+            resetGame();
+        }
+
+        function setupSoundLooping() {
+            const soundsToLoop = ['background', 'farmer_move', 'run_normal', 'run_holding'];
+            soundsToLoop.forEach(key => {
+                if (sounds[key]) {
+                    sounds[key].addEventListener('ended', function() {
+                        this.currentTime = 0;
+                        this.play();
+                    }, false);
+                }
+            });
+        }
+
+        function handleKeyDown(e) {
+            const key = e.key.toLowerCase();
+            keys[key] = true;
+            tryPlayAllSounds();
+            
+            if (gameState === STATE_START) {
+                startGame();
+            } else if (gameState === STATE_WIN) {
+                startGame();
+            }
+        }
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            // Cập nhật lại các khu vực dựa trên chiều rộng màn hình
+            START_AREA_END = canvas.width * 0.1; // 10% đầu là khu vực an toàn (Tỷ lệ 1:8:1)
+            OBSTACLE_AREA_END = canvas.width * 0.9; // 10% + 80% = 90%
+
+            PLAYER_START_Y = canvas.height / 2 - PLAYER_SIZE / 2;
+            RETURN_BOX_X = START_AREA_END / 2 - RETURN_BOX_SIZE / 2;
+            RETURN_BOX_Y = canvas.height / 2 - RETURN_BOX_SIZE / 2;
+            // Đảm bảo người chơi không bị kẹt ngoài màn hình khi resize
+            if (player) {
+                player.y = Math.min(player.y, canvas.height - PLAYER_SIZE);
+            }
+            
+            // Tái tạo vị trí của spammer để chúng luôn ở đúng góc
+            if (gameState === STATE_GAMEPLAY) {
+                spawnSpammers();
+            }
+        }
+        
+        function stopAllSounds(keepBackground = false) {
+            for (const key in sounds) {
+                if (keepBackground && key === 'background') {
+                    continue; // Bỏ qua nhạc nền nếu được yêu cầu
+                }
+                sounds[key].pause();
+                sounds[key].currentTime = 0;
+            }
+        }
+        
+        function tryPlayAllSounds() {
+            // Trình duyệt yêu cầu tương tác người dùng trước khi phát âm thanh
+            // Hàm này cố gắng phát và dừng ngay lập tức để "mở khóa" âm thanh, chỉ chạy 1 lần.
+            if (soundsUnlocked) return;
+
+            for (const key in sounds) {
+                sounds[key].play().catch(() => {});
+                sounds[key].pause();
+            }
+            soundsUnlocked = true;
+            console.log("Audio has been unlocked.");
+        }
+
+        function setupTouchControls() {
+            const base = document.getElementById('joystick-base');
+            const handle = document.getElementById('joystick-handle');
+            const baseRadius = 60; // 120px / 2
+            const handleRadius = 30; // 60px / 2
+            const maxMove = baseRadius - handleRadius;
+
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                tryPlayAllSounds();
+
+                if (gameState === STATE_START || gameState === STATE_WIN) {
+                    startGame();
+                    return; // Không xử lý joystick ngay trong lần chạm đầu tiên này
+                }
+
+                // Chỉ kích hoạt joystick trên di động và khi đang chơi
+                if (!isMobileDevice || gameState !== STATE_GAMEPLAY) return;
+
+                const touch = e.touches[0];
+                joystick.active = true;
+                joystick.startX = touch.clientX;
+                joystick.startY = touch.clientY;
+
+                base.style.display = 'block';
+                handle.style.display = 'block';
+                base.style.left = `${joystick.startX - baseRadius}px`;
+                base.style.top = `${joystick.startY - baseRadius}px`;
+                handle.style.left = `${joystick.startX - handleRadius}px`;
+                handle.style.top = `${joystick.startY - handleRadius}px`;
+            }, { passive: false });
+
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (!isMobileDevice || !joystick.active) return;
+
+                const touch = e.touches[0];
+                joystick.currentX = touch.clientX;
+                joystick.currentY = touch.clientY;
+
+                let dx = joystick.currentX - joystick.startX;
+                let dy = joystick.currentY - joystick.startY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance > maxMove) {
+                    dx = (dx / distance) * maxMove;
+                    dy = (dy / distance) * maxMove;
+                }
+
+                handle.style.left = `${joystick.startX + dx - handleRadius}px`;
+                handle.style.top = `${joystick.startY + dy - handleRadius}px`;
+
+                // Cập nhật vector di chuyển chuẩn hóa
+                joystick.dx = dx / maxMove;
+                joystick.dy = dy / maxMove;
+            }, { passive: false });
+
+            const onTouchEnd = (e) => {
+                if (!isMobileDevice || !joystick.active) return;
+                e.preventDefault();
+                joystick.active = false;
+                joystick.dx = 0;
+                joystick.dy = 0;
+                base.style.display = 'none';
+                handle.style.display = 'none';
+            };
+
+            canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+            canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
+        }
+        function checkRectCollision(rect1, rect2, size1, size2) {
+            const r1 = {
+                x: rect1.x,
+                y: rect1.y,
+                w: size1 ? size1.w : rect1.width,
+                h: size1 ? size1.h : rect1.height
+            };
+            const r2 = {
+                x: rect2.x,
+                y: rect2.y,
+                w: size2 ? size2.w : rect2.width,
+                h: size2 ? size2.h : rect2.height
+            };
+            return r1.x < r2.x + r2.w &&
+                   r1.x + r1.w > r2.x &&
+                   r1.y < r2.y + r2.h &&
+                   r1.y + r1.h > r2.y;
+        }
+
+        function checkRectCircleCollision(rx, ry, rw, rh, cx, cy, cr) {
+            let testX = cx;
+            let testY = cy;
+            if (cx < rx) testX = rx;
+            else if (cx > rx + rw) testX = rx + rw;
+            if (cy < ry) testY = ry;
+            else if (cy > ry + rh) testY = ry + rh;
+            const distX = cx - testX;
+            const distY = cy - testY;
+            return (distX * distX + distY * distY) <= (cr * cr);
+        }
+
+        // Bắt đầu game
+        init();
+    </script>
+</body>
+</html>
