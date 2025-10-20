@@ -45,23 +45,28 @@
         const ctx = canvas.getContext('2d');
 
         // --- TỰ ĐỘNG CO GIÃN CHO DI ĐỘNG ---
-        const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent); // Giữ lại để bật/tắt joystick
+        const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent);
+        const scaleFactor = isMobileDevice ? 0.7 : 1.0; // Giảm 30% kích thước và tốc độ trên di động
 
         // --- CÀI ĐẶT GAME ---
-        // Các hằng số này sẽ được tính toán lại trong resizeCanvas
-        let PLAYER_SPEED;
-        let PLAYER_SIZE;
-        let SPAMMER_SIZE;
-        let FARMER_SIZE;
-        let FARMER_SPEED;
-        let FARMER_HITBOX_WIDTH;
-        let FARMER_HITBOX_HEIGHT;
-        let BULLET_SPEED;
+        const PLAYER_SPEED = 2.0 * scaleFactor;
+        const PLAYER_SIZE = 100 * scaleFactor;
+        const SPAMMER_SIZE = 100 * scaleFactor;
+        const FARMER_SIZE = 100 * scaleFactor;
+        const FARMER_HITBOX_WIDTH = 40 * scaleFactor; // Hitbox thực tế của Farmer
+        const FARMER_HITBOX_HEIGHT = 100 * scaleFactor;
+        const BULLET_SPEED = 1.4 * scaleFactor;
         const BULLET_INTERVAL = 400; // frames (Increased, shoots slower)
+        const FARMER_SPEED = 2 * scaleFactor;
         const FARMER_ANIMATION_FRAMES = 1; // Sửa lại: Farmer là ảnh tĩnh
         const STONE_COUNT_TO_WIN = 5; // Số đá cần thu thập để thắng
         const INVINCIBILITY_DURATION = 120; // 2 giây ở 60 FPS
         const PLAYER_HOLDING_STONE_SLOWDOWN = 0.8; // Giảm 20% tốc độ khi cầm đá
+
+        // --- CÀI ĐẶT CO GIÃN CANVAS ---
+        const BASE_WIDTH = 1280; // Kích thước game chuẩn (chiều rộng)
+        const BASE_HEIGHT = 720;  // Kích thước game chuẩn (chiều cao)
+        let scaleInfo = { scale: 1, offsetX: 0, offsetY: 0 }; // Thông tin co giãn
 
         // Khu vực (sẽ được tính toán lại trong resizeCanvas)
         let START_AREA_END;
@@ -71,12 +76,12 @@
         const CREATOR_NAME = "QuyTu";
         const PLAYER_START_X = 50;
         let PLAYER_START_Y; // Sẽ được tính toán khi resize
-        let RETURN_BOX_SIZE; // Sẽ được tính toán khi resize
+        const RETURN_BOX_SIZE = 100;
         let RETURN_BOX_X; // Sẽ được tính toán khi resize
         let RETURN_BOX_Y; // Sẽ được tính toán khi resize
 
         // Cài đặt đá (sử dụng hình ảnh)
-        const STONE_SIZE = 60; // Giữ kích thước đá không đổi
+        const STONE_SIZE = 60 * scaleFactor;
         const STONE_TYPES = [
             { assetKey: 'stone1', size: STONE_SIZE },
             { assetKey: 'stone2', size: STONE_SIZE },
@@ -284,7 +289,6 @@
 
             // Cập nhật hướng nhìn của nhân vật
             if (dx > 0) player.facingRight = true;
-            if (dx > 0.1) player.facingRight = true;
             if (dx < 0) player.facingRight = false;
 
             player.x += dx * currentSpeed;
@@ -528,6 +532,12 @@
             // Lưu trạng thái canvas trước khi áp dụng hiệu ứng rung
             ctx.save();
 
+            // Xóa toàn bộ màn hình thật
+            ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+            // Áp dụng co giãn và căn giữa cho toàn bộ game
+            ctx.translate(scaleInfo.offsetX, scaleInfo.offsetY);
+            ctx.scale(scaleInfo.scale, scaleInfo.scale);
+
             // Áp dụng hiệu ứng rung nếu đang hoạt động
             if (screenShake.duration > 0) {
                 screenShake.duration--;
@@ -536,6 +546,9 @@
                 ctx.translate(dx, dy);
             }
 
+            // Vẽ một nền đen cho khu vực game (để che phần thừa nếu có)
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
             if (gameState === STATE_LOADING) {
                 drawLoadingScreen();
             } else if (gameState === STATE_START) {
@@ -816,43 +829,44 @@
         }
         
         function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+            // Đặt kích thước logic của canvas là kích thước chuẩn
+            canvas.width = BASE_WIDTH;
+            canvas.height = BASE_HEIGHT;
 
-            // --- TÍNH TOÁN LẠI KÍCH THƯỚC DỰA TRÊN CHIỀU CAO MÀN HÌNH ---
-            // Chọn một kích thước tham chiếu, ví dụ: người chơi cao 1/8 màn hình
-            const baseSize = canvas.height / 8; 
+            // Tính toán tỷ lệ co giãn để vừa với màn hình thật mà không làm méo hình
+            const scaleX = window.innerWidth / BASE_WIDTH;
+            const scaleY = window.innerHeight / BASE_HEIGHT;
+            scaleInfo.scale = Math.min(scaleX, scaleY); // Dùng tỷ lệ nhỏ hơn để đảm bảo vừa vặn
 
-            PLAYER_SIZE = baseSize;
-            SPAMMER_SIZE = baseSize;
-            FARMER_SIZE = baseSize;
-            RETURN_BOX_SIZE = baseSize;
-
-            // Tính toán các kích thước và tốc độ khác dựa trên baseSize
-            FARMER_HITBOX_WIDTH = FARMER_SIZE * 0.4; // 40% chiều rộng của Farmer
-            FARMER_HITBOX_HEIGHT = FARMER_SIZE;
-
-            // Tốc độ cũng nên được điều chỉnh để cảm giác chơi nhất quán
-            const baseSpeed = canvas.height / 400; // Tốc độ cơ bản
-            PLAYER_SPEED = baseSpeed * 1.2;
-            FARMER_SPEED = baseSpeed;
-            BULLET_SPEED = baseSpeed * 0.8;
+            // Tính toán vị trí để căn giữa game trên màn hình
+            const newWidth = BASE_WIDTH * scaleInfo.scale;
+            const newHeight = BASE_HEIGHT * scaleInfo.scale;
+            scaleInfo.offsetX = (window.innerWidth - newWidth) / 2;
+            scaleInfo.offsetY = (window.innerHeight - newHeight) / 2;
 
             // Cập nhật lại các khu vực dựa trên chiều rộng màn hình
-            START_AREA_END = canvas.width * 0.1; // 10% đầu là khu vực an toàn (Tỷ lệ 1:8:1)
-            OBSTACLE_AREA_END = canvas.width * 0.9; // 10% + 80% = 90%
+            START_AREA_END = BASE_WIDTH * 0.1; // 10% đầu là khu vực an toàn
+            OBSTACLE_AREA_END = BASE_WIDTH * 0.9; // 10% + 80% = 90%
 
-            PLAYER_START_Y = canvas.height / 2 - PLAYER_SIZE / 2;
+            PLAYER_START_Y = BASE_HEIGHT / 2 - PLAYER_SIZE / 2;
             RETURN_BOX_X = START_AREA_END / 2 - RETURN_BOX_SIZE / 2;
-            RETURN_BOX_Y = canvas.height / 2 - RETURN_BOX_SIZE / 2;
+            RETURN_BOX_Y = BASE_HEIGHT / 2 - RETURN_BOX_SIZE / 2;
+
             // Đảm bảo người chơi không bị kẹt ngoài màn hình khi resize
-            if (player) {
-                player.y = Math.min(player.y, canvas.height - PLAYER_SIZE);
+            // Tái tạo lại các đối tượng để chúng phù hợp với kích thước mới
+            if (gameState === STATE_GAMEPLAY) {
+                spawnSpammers();
             }
-            
-            // Tái tạo vị trí của spammer để chúng luôn ở đúng góc
-            // spawnSpammers() sẽ được gọi trong resetGame() khi bắt đầu màn chơi mới,
-            // không cần gọi lại ở đây để tránh spammer xuất hiện lại đột ngột khi xoay màn hình.
+        }
+        
+        function stopAllSounds(keepBackground = false) {
+            for (const key in sounds) {
+                if (keepBackground && key === 'background') {
+                    continue; // Bỏ qua nhạc nền nếu được yêu cầu
+                }
+                sounds[key].pause();
+                sounds[key].currentTime = 0;
+            }
         }
         
         function tryPlayAllSounds() {
@@ -860,12 +874,12 @@
             // Hàm này cố gắng phát và dừng ngay lập tức để "mở khóa" âm thanh, chỉ chạy 1 lần.
             if (soundsUnlocked) return;
 
-            // Chỉ cần phát một âm thanh (ví dụ: nhạc nền) để mở khóa.
-            // Trình duyệt sẽ nhớ quyền phát âm thanh cho các lần sau.
-            sounds.background.play().then(() => {
-                soundsUnlocked = true;
-                console.log("Audio has been unlocked.");
-            }).catch(e => console.log("User interaction is needed to unlock audio."));
+            for (const key in sounds) {
+                sounds[key].play().catch(() => {});
+                sounds[key].pause();
+            }
+            soundsUnlocked = true;
+            console.log("Audio has been unlocked.");
         }
 
         function setupTouchControls() {
@@ -874,6 +888,13 @@
             const baseRadius = 60; // 120px / 2
             const handleRadius = 30; // 60px / 2
             const maxMove = baseRadius - handleRadius;
+
+            // Hàm chuyển đổi tọa độ chạm trên màn hình thật sang tọa độ trong game
+            function getGameCoords(touch) {
+                const x = (touch.clientX - scaleInfo.offsetX) / scaleInfo.scale;
+                const y = (touch.clientY - scaleInfo.offsetY) / scaleInfo.scale;
+                return { x, y };
+            }
 
             canvas.addEventListener('touchstart', (e) => {
                 e.preventDefault();
@@ -887,10 +908,11 @@
                 // Chỉ kích hoạt joystick trên di động và khi đang chơi
                 if (!isMobileDevice || gameState !== STATE_GAMEPLAY) return;
 
-                const touch = e.touches[0];
+                const touch = e.touches[0]; // Tọa độ trên màn hình thật
+                const gameCoords = getGameCoords(touch); // Tọa độ trong game
                 joystick.active = true;
-                joystick.startX = touch.clientX;
-                joystick.startY = touch.clientY;
+                joystick.startX = gameCoords.x;
+                joystick.startY = gameCoords.y;
 
                 base.style.display = 'block';
                 handle.style.display = 'block';
@@ -904,9 +926,10 @@
                 e.preventDefault();
                 if (!isMobileDevice || !joystick.active) return;
 
-                const touch = e.touches[0];
-                joystick.currentX = touch.clientX;
-                joystick.currentY = touch.clientY;
+                const touch = e.touches[0]; // Tọa độ trên màn hình thật
+                const gameCoords = getGameCoords(touch); // Tọa độ trong game
+                joystick.currentX = gameCoords.x;
+                joystick.currentY = gameCoords.y;
 
                 let dx = joystick.currentX - joystick.startX;
                 let dy = joystick.currentY - joystick.startY;
@@ -917,8 +940,12 @@
                     dy = (dy / distance) * maxMove;
                 }
 
-                handle.style.left = `${joystick.startX + dx - handleRadius}px`;
-                handle.style.top = `${joystick.startY + dy - handleRadius}px`;
+                // Vị trí của joystick handle phải được tính lại theo tọa độ màn hình thật
+                const handleScreenX = (joystick.startX + dx) * scaleInfo.scale + scaleInfo.offsetX;
+                const handleScreenY = (joystick.startY + dy) * scaleInfo.scale + scaleInfo.offsetY;
+
+                handle.style.left = `${handleScreenX - handleRadius}px`;
+                handle.style.top = `${handleScreenY - handleRadius}px`;
 
                 // Cập nhật vector di chuyển chuẩn hóa
                 joystick.dx = dx / maxMove;
