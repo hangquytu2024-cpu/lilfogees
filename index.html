@@ -46,7 +46,7 @@
 
         // --- TỰ ĐỘNG CO GIÃN CHO DI ĐỘNG ---
         const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent);
-        const scaleFactor = isMobileDevice ? 2.0 : 1.0; // Tăng 2 lần tốc độ trên di động, giữ nguyên trên PC
+        const scaleFactor = isMobileDevice ? 1.5 : 1.0; // Tăng 50% tốc độ trên di động, giữ nguyên trên PC
 
         // --- CÀI ĐẶT GAME ---
         const PLAYER_SPEED = 2.0 * scaleFactor;
@@ -498,12 +498,19 @@
 
         function handlePlayerHit() {
             // Không còn mạng, chỉ reset vị trí và bật bất tử
+            stopAllSounds(true); // Dừng các âm thanh hiệu ứng, giữ nhạc nền
+            // Đảm bảo nhạc nền tiếp tục phát
+            if (sounds.background.paused) {
+                sounds.background.play().catch(e => {});
+            }
+
             sounds.player_hit.currentTime = 0; // Đảm bảo âm thanh phát lại từ đầu
             sounds.player_hit.play(); // Phát âm thanh va chạm
             player.animation.invincible = true;
             player.animation.invincibilityTimer = INVINCIBILITY_DURATION;
             player.animation.isStunned = true;
             player.animation.stunTimer = 60; // 1 giây ở 60 FPS
+            player.animation.state = 'idle'; // Chuyển về trạng thái đứng yên
             // Kích hoạt hiệu ứng rung màn hình
             startScreenShake(15, 5); // Rung trong 15 frames với cường độ 5px
             resetPlayerPosition();
@@ -852,11 +859,6 @@
             RETURN_BOX_X = START_AREA_END / 2 - RETURN_BOX_SIZE / 2;
             RETURN_BOX_Y = BASE_HEIGHT / 2 - RETURN_BOX_SIZE / 2;
 
-            // Đảm bảo người chơi không bị kẹt ngoài màn hình khi resize
-            // Tái tạo lại các đối tượng để chúng phù hợp với kích thước mới
-            if (gameState === STATE_GAMEPLAY) {
-                spawnSpammers();
-            }
         }
         
         function stopAllSounds(keepBackground = false) {
