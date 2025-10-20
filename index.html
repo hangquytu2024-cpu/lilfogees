@@ -46,10 +46,10 @@
 
         // --- TỰ ĐỘNG CO GIÃN CHO DI ĐỘNG ---
         const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent);
-        const scaleFactor = isMobileDevice ? 0.5 : 1.0; // Giảm 50% kích thước và tốc độ trên di động
+        const scaleFactor = isMobileDevice ? 0.2 : 1.0; // Giảm 80% kích thước trên di động
 
         // --- CÀI ĐẶT GAME ---
-        const PLAYER_SPEED = 2.0 * scaleFactor;
+        const PLAYER_SPEED = 2.0; // Tốc độ người chơi không đổi
         const PLAYER_SIZE = 100 * scaleFactor;
         const SPAMMER_SIZE = 100 * scaleFactor;
         const FARMER_SIZE = 100 * scaleFactor;
@@ -213,11 +213,8 @@
         }
 
         function resetGame() {
-            stopAllSounds(true); // Dừng tất cả âm thanh trừ nhạc nền
-            sounds.farmer_move.play().catch(e => console.log("Interaction needed to play audio"));
-            // Nhạc nền sẽ tiếp tục chơi nếu đã được bắt đầu
-            if (sounds.background.paused) sounds.background.play().catch(e => console.log("Interaction needed to play audio"));
             score = 0;
+            stopAllSounds(true); // Dừng các âm thanh game, giữ nhạc nền nếu đang phát
             gameStartTime = performance.now(); // Bắt đầu đếm giờ
             spammers = [];
             finalTime = null; // Reset thời gian hoàn thành
@@ -796,6 +793,12 @@
 
         function startGame() {
             gameState = STATE_GAMEPLAY;
+            // Bắt đầu các âm thanh lặp lại một cách an toàn sau khi người dùng tương tác
+            if (sounds.background.paused) {
+                sounds.background.play().catch(e => console.log("Interaction needed for background music"));
+            }
+            sounds.farmer_move.play().catch(e => console.log("Interaction needed for farmer sound"));
+
             resetGame();
         }
 
