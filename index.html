@@ -46,7 +46,7 @@
 
         // --- TỰ ĐỘNG CO GIÃN CHO DI ĐỘNG ---
         const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent);
-        const scaleFactor = isMobileDevice ? 1.5 : 1.0; // Tăng 50% tốc độ trên di động, giữ nguyên trên PC
+        const scaleFactor = isMobileDevice ? 2.0 : 1.0; // Tăng 2 lần tốc độ trên di động, giữ nguyên trên PC
 
         // --- CÀI ĐẶT GAME ---
         const PLAYER_SPEED = 2.0 * scaleFactor;
@@ -859,6 +859,11 @@
             RETURN_BOX_X = START_AREA_END / 2 - RETURN_BOX_SIZE / 2;
             RETURN_BOX_Y = BASE_HEIGHT / 2 - RETURN_BOX_SIZE / 2;
 
+            // Đảm bảo người chơi không bị kẹt ngoài màn hình khi resize
+            // Tái tạo lại các đối tượng để chúng phù hợp với kích thước mới
+            if (gameState === STATE_GAMEPLAY) {
+                spawnSpammers();
+            }
         }
         
         function stopAllSounds(keepBackground = false) {
