@@ -9,44 +9,17 @@
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         canvas { display: block; }
-        /* --- CSS CHO JOYSTICK ẢO --- */
-        .joystick {
-            position: fixed;
-            display: none; /* Ẩn mặc định, chỉ hiện khi chạm */
-            opacity: 0.7;
-            z-index: 10;
-            user-select: none; /* Ngăn chọn văn bản */
-            pointer-events: none; /* Cho phép click xuyên qua */
-        }
-        #joystick-base {
-            width: 120px;
-            height: 120px;
-            background: #888;
-            border: 2px solid #fff;
-            border-radius: 50%;
-        }
-        #joystick-handle {
-            width: 60px;
-            height: 60px;
-            background: #ccc;
-            border-radius: 50%;
-        }
     </style>
 </head>
 <body>
     <canvas id="gameCanvas"></canvas>
-    <!-- Joystick ảo sẽ được tạo và điều khiển bằng JavaScript -->
-    <div id="joystick-base" class="joystick">
-        <div id="joystick-handle" class="joystick"></div>
-    </div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-        // --- TỰ ĐỘNG CO GIÃN CHO DI ĐỘNG ---
-        const isMobileDevice = /Mobi|Android/i.test(navigator.userAgent);
-        const scaleFactor = isMobileDevice ? 0.2 : 1.0; // Giảm 80% kích thước trên di động
+        // --- TỰ ĐỘNG CO GIÃN (ĐÃ BỎ CHO DI ĐỘNG) ---
+        const scaleFactor = 1.0; // Giữ kích thước gốc cho PC
 
         // --- CÀI ĐẶT GAME ---
         const PLAYER_SPEED = 2.0; // Tốc độ người chơi không đổi
@@ -98,16 +71,6 @@
         let keys = {};
         let gameStartTime = 0; // Để theo dõi thời gian chơi
         let finalTime = null; // Để lưu thời gian hoàn thành
-        // Trạng thái joystick ảo
-        let joystick = {
-            active: false,
-            startX: 0,
-            startY: 0,
-            currentX: 0,
-            currentY: 0,
-            dx: 0, // Vector di chuyển x (-1 đến 1)
-            dy: 0  // Vector di chuyển y (-1 đến 1)
-        }; 
         let screenShake = {
             duration: 0,
             magnitude: 0,
@@ -263,17 +226,11 @@
             let dx = 0;
             let dy = 0;
 
-            if (isMobileDevice && joystick.active) {
-                // Trên di động, sử dụng vector từ joystick
-                dx = joystick.dx;
-                dy = joystick.dy;
-            } else {
-                // Trên PC, sử dụng bàn phím
-                if (keys['w'] || keys['arrowup']) dy = -1;
-                if (keys['s'] || keys['arrowdown']) dy = 1;
-                if (keys['a'] || keys['arrowleft']) dx = -1;
-                if (keys['d'] || keys['arrowright']) dx = 1;
-            }
+            // Chỉ sử dụng bàn phím
+            if (keys['w'] || keys['arrowup']) dy = -1;
+            if (keys['s'] || keys['arrowdown']) dy = 1;
+            if (keys['a'] || keys['arrowleft']) dx = -1;
+            if (keys['d'] || keys['arrowright']) dx = 1;
 
             // Giảm tốc độ nếu đang cầm đá
             const currentSpeed = player.holdingStone ? PLAYER_SPEED * PLAYER_HOLDING_STONE_SLOWDOWN : PLAYER_SPEED;
@@ -576,10 +533,48 @@
             drawBackground(); // Vẽ nền trước
             ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = 'white'; 
-            ctx.font = 'bold 40px Arial';
+            
             ctx.textAlign = 'center';
-            ctx.fillText('Press any key or tap to start', canvas.width / 2, canvas.height / 2);
+
+            // Game Title
+            ctx.fillStyle = 'gold';
+            ctx.font = 'bold 60px Arial';
+            ctx.fillText("QuyTu's Adventure", canvas.width / 2, canvas.height * 0.2);
+
+            // Instructions
+            ctx.fillStyle = 'white';
+            let yPos = canvas.height * 0.35;
+            const lineHeight = 40;
+
+            // Objective
+            ctx.font = 'bold 32px Arial';
+            ctx.fillText('--- OBJECTIVE ---', canvas.width / 2, yPos);
+            yPos += lineHeight * 1.5;
+            ctx.font = '24px Arial';
+            ctx.fillText(`Collect Ember stones and bring them to the safe zone on the left.`, canvas.width / 2, yPos);
+            yPos += lineHeight * 2;
+
+            // Controls
+            ctx.font = 'bold 32px Arial';
+            ctx.fillText('--- CONTROLS ---', canvas.width / 2, yPos);
+            yPos += lineHeight * 1.5;
+            ctx.font = '24px Arial';
+            ctx.fillText('Use WASD or Arrow Keys to move.', canvas.width / 2, yPos);
+            yPos += lineHeight * 2;
+
+            // Tips
+            ctx.font = 'bold 32px Arial';
+            ctx.fillText('--- TIPS ---', canvas.width / 2, yPos);
+            yPos += lineHeight * 1.2;
+            ctx.font = '24px Arial';
+            ctx.fillText('Avoid enemies and their projectiles. Getting hit will make u get back to the start points, your stone will be left on the ground!', canvas.width / 2, yPos);
+            yPos += lineHeight;
+            ctx.fillText('You move slower while carrying a stone.', canvas.width / 2, yPos);
+
+            // Start prompt
+            ctx.font = 'bold 30px Arial';
+            ctx.fillStyle = '#90EE90'; // Light green
+            ctx.fillText('Press any key or click to start', canvas.width / 2, canvas.height - 60);
         }
 
         function drawBackground() {
@@ -785,9 +780,7 @@
             window.addEventListener('resize', resizeCanvas);
             window.addEventListener('keydown', handleKeyDown);
             window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
-
-            // Hợp nhất xử lý chạm và click vào một chỗ để tránh xung đột trên di động
-            setupTouchControls();
+            canvas.addEventListener('click', handleCanvasClick);
         }
 
         function startGame() {
@@ -820,6 +813,13 @@
             if (gameState === STATE_START) {
                 startGame();
             } else if (gameState === STATE_WIN) {
+                startGame();
+            }
+        }
+
+        function handleCanvasClick() {
+            // Cho phép click chuột để bắt đầu game (thay cho tap trên di động)
+            if (gameState === STATE_START || gameState === STATE_WIN) {
                 startGame();
             }
         }
@@ -856,75 +856,6 @@
             }
         }
         
-        function setupTouchControls() {
-            const base = document.getElementById('joystick-base');
-            const handle = document.getElementById('joystick-handle');
-            const baseRadius = 60; // 120px / 2
-            const handleRadius = 30; // 60px / 2
-            const maxMove = baseRadius - handleRadius;
-
-            canvas.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-
-                if (gameState === STATE_START || gameState === STATE_WIN) {
-                    startGame();
-                    return; // Không xử lý joystick ngay trong lần chạm đầu tiên này
-                }
-
-                // Chỉ kích hoạt joystick trên di động và khi đang chơi
-                if (!isMobileDevice || gameState !== STATE_GAMEPLAY) return;
-
-                const touch = e.touches[0];
-                joystick.active = true;
-                joystick.startX = touch.clientX;
-                joystick.startY = touch.clientY;
-
-                base.style.display = 'block';
-                handle.style.display = 'block';
-                base.style.left = `${joystick.startX - baseRadius}px`;
-                base.style.top = `${joystick.startY - baseRadius}px`;
-                handle.style.left = `${joystick.startX - handleRadius}px`;
-                handle.style.top = `${joystick.startY - handleRadius}px`;
-            }, { passive: false });
-
-            canvas.addEventListener('touchmove', (e) => {
-                e.preventDefault();
-                if (!isMobileDevice || !joystick.active) return;
-
-                const touch = e.touches[0];
-                joystick.currentX = touch.clientX;
-                joystick.currentY = touch.clientY;
-
-                let dx = joystick.currentX - joystick.startX;
-                let dy = joystick.currentY - joystick.startY;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-
-                if (distance > maxMove) {
-                    dx = (dx / distance) * maxMove;
-                    dy = (dy / distance) * maxMove;
-                }
-
-                handle.style.left = `${joystick.startX + dx - handleRadius}px`;
-                handle.style.top = `${joystick.startY + dy - handleRadius}px`;
-
-                // Cập nhật vector di chuyển chuẩn hóa
-                joystick.dx = dx / maxMove;
-                joystick.dy = dy / maxMove;
-            }, { passive: false });
-
-            const onTouchEnd = (e) => {
-                if (!isMobileDevice || !joystick.active) return;
-                e.preventDefault();
-                joystick.active = false;
-                joystick.dx = 0;
-                joystick.dy = 0;
-                base.style.display = 'none';
-                handle.style.display = 'none';
-            };
-
-            canvas.addEventListener('touchend', onTouchEnd, { passive: false });
-            canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
-        }
         function checkRectCollision(rect1, rect2, size1, size2) {
             const r1 = {
                 x: rect1.x,
